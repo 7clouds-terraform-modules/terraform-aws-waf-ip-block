@@ -7,63 +7,213 @@ This module is a part of our product SCA — An automated API and Serverless Inf
 
 Please rank this repo 5 starts if you like our job!
 
-## Usage
+## Requirements
 
-This module is set for blocking any non listed IP, it counts on waf ip set, waf web acl rules and waf association. By default, it is configured as regional scope and ipv4, but here is the beauty on using modules, you may easily suit it to your needs.
+This module requires:
+*   Terraform version `v1.3.0` or later.
+*   AWS Provider version `v5.0.0` or later.
 
-* Pre Deployment
+These versions are specified in the `versions.tf` file. It's recommended to use these versions or newer for compatibility with all features.
 
-1. To authorize IP's, fill the variable "WAF_ALLOWED_IP_ADDRESS_LIST" with allowed IP's as a list (with "/32" SUFFIX FOR IPV4). eg.: ["109.155.209.167/32", "172.0.0.1/32"].
-For allowying your personal IPV4 it must be your external one.
-2. It's also possible to configure it to IPV6. In this case you need to change the variables "WAF_IP_ADDRESS_VERSION" value for "IPV6" and check more details on [AWS DOCUMENTATION](https://docs.aws.amazon.com/pt_br/waf/latest/APIReference/API_wafRegional_IPSetDescriptor.html) for IP set description.
-3. The variable "RULES" is a map for applying on a dynamic block, it's possible to adapt it to your needs.
-4. For "aws_wafv2_web_acl_association", you need to reference an api gateway stage or load balancer arn in order to perform the association, otherwise the rules will not be attached to any resource and the association will not be created. That's the variable to place the value(s): WEB_ACL_ASSOCIATION_RESOURCE_ARN_LIST.
+## Module Functionality
+
+This Terraform module is designed to create and configure an AWS Web Application Firewall (WAFv2). Its primary purpose is to enhance security by controlling web access based on IP addresses.
+
+The key functionalities are:
+
+*   **IP Set Creation**: It creates an AWS WAF IP set based on a list of allowed IP addresses provided by the `WAF_ALLOWED_IP_ADDRESS_LIST` variable.
+*   **Web ACL Configuration**:
+    *   A Web Access Control List (ACL) is established with a **default action to block** all incoming requests.
+    *   A rule is then configured within this Web ACL to **allow** requests originating from the IP addresses defined in the aforementioned IP set.
+*   **Resource Association**: The configured Web ACL can be associated with AWS resources such as Application Load Balancers or API Gateway stages using the `WEB_ACL_ASSOCIATION_RESOURCE_ARN_LIST` variable.
+
+In essence, this module implements an IP whitelisting mechanism: it blocks all traffic by default and only permits access from explicitly specified IP addresses. It can also be extended with additional WAF rules.
+
+## Key AWS Resources Managed
+
+This module provisions the following core AWS WAFv2 resources:
+
+*   **`aws_wafv2_ip_set`**:
+    *   This resource creates and manages a set of IP addresses.
+    *   In this module, it holds the list of explicitly allowed IP addresses (`WAF_ALLOWED_IP_ADDRESS_LIST`) that will be granted access.
+
+*   **`aws_wafv2_web_acl`**:
+    *   This is the central component of the WAF, representing the Web Access Control List.
+    *   It is configured with a default action to `block` all incoming web requests.
+    *   It contains rules that define how requests are handled. A primary rule is set up to `allow` requests originating from the IPs in the `aws_wafv2_ip_set`.
+    *   Additional rules (e.g., for rate limiting or managed rule groups like SQL injection protection) can also be added.
+
+*   **`aws_wafv2_web_acl_association`**:
+    *   This resource links the configured `aws_wafv2_web_acl` to specific AWS resources.
+    *   Supported resources include Application Load Balancers (ALBs) and Amazon API Gateway stages. Once associated, the WAF rules are enforced on the traffic to these resources.
+
+## Configuration and Customization
+
+This module provides several options to tailor the WAF setup to your specific requirements. The primary mechanism for IP whitelisting is supplemented by the following configurations:
+
+*   **Allowed IP Addresses**:
+    *   The core of the IP whitelisting functionality is defined by the `WAF_ALLOWED_IP_ADDRESS_LIST` variable. This list should contain the IP addresses or CIDR blocks that are permitted access.
+    *   For IPv4 addresses, ensure they include the `/32` suffix (e.g., `"192.0.2.44/32"`).
+
+*   **IP Address Version (`WAF_IP_ADDRESS_VERSION`)**:
+    *   Specifies the IP version (`"IPV4"` or `"IPV6"`) for the IP set. (Default: `"IPV4"`)
+    *   Ensure `WAF_ALLOWED_IP_ADDRESS_LIST` entries match this version (e.g., `/32` for IPv4, `/128` for IPv6).
+
+*   **Deployment Scope (`WAF_IP_SET_SCOPE`)**:
+    *   Determines if the WAF is for regional resources or CloudFront. (Default: `"REGIONAL"`)
+    *   `"REGIONAL"`: For Application Load Balancers, API Gateways, etc.
+    *   `"CLOUDFRONT"`: For Amazon CloudFront distributions.
+
+*   **Resource Association**:
+    *   To apply the WAF rules, you must associate the Web ACL with specific AWS resources.
+    *   The `WEB_ACL_ASSOCIATION_RESOURCE_ARN_LIST` variable takes a list of ARNs for the resources to be protected (e.g., ARN of an Application Load Balancer or an Amazon API Gateway stage). If left empty, the Web ACL is created but not attached.
+
+*   **Additional WAF Rules (`RULES`)**:
+    *   Beyond the primary IP whitelisting, you can incorporate additional rules, particularly AWS Managed Rule Groups, using the `RULES` variable. This variable expects a list of objects, where each object defines a rule.
+    *   **Rule Object Attributes**:
+        *   `name` (string, required): A unique name for the rule within the Web ACL.
+        *   `priority` (number, required): The evaluation order for the rule. Rules are evaluated from lowest priority number to highest. Ensure this doesn't conflict with the default IP Set Allow rule which has priority 1.
+        *   `override_action` (string, optional, default: `"none"`): For managed rule groups, this determines how the rule group's actions are handled. Set to `"none"` to use the actions defined within the rule group, or `"count"` to only count matching requests without applying the rule group's block/allow actions. Must be one of `"none"` or `"count"`.
+        *   `metric_name` (string, optional): A name for the CloudWatch metric associated with this rule. If not provided, it defaults to the rule's `name` (e.g., `name = "MyRule"` results in `metric_name = "MyRule"`).
+        *   `cloudwatch_metrics_enabled` (bool, optional, default: `false`): Set to `true` to enable CloudWatch metrics for this specific rule.
+        *   `sampled_requests_enabled` (bool, optional, default: `false`): Set to `true` to enable request sampling for this specific rule.
+        *   `managed_rule_group_statement` (object, required): Defines the managed rule group to use.
+            *   `vendor_name` (string, required): The vendor of the managed rule group (e.g., `"AWS"`).
+            *   `name` (string, required): The name of the managed rule group (e.g., `"AWSManagedRulesCommonRuleSet"`).
+    *   _Example of a rule object within the `RULES` list_:
+      ```hcl
+      {
+        name                       = "AWSManagedRulesCommon"
+        priority                   = 10
+        override_action            = "none"
+        cloudwatch_metrics_enabled = true
+        // metric_name will default to "AWSManagedRulesCommon"
+        // sampled_requests_enabled will default to false
+        managed_rule_group_statement = {
+          vendor_name = "AWS"
+          name        = "AWSManagedRulesCommonRuleSet"
+        }
+      }
+      ```
+
+*   **WAF Logging**:
+    *   `enable_waf_logging` (bool, default: `false`): Set to `true` to enable logging for the Web ACL.
+    *   `waf_logging_firehose_arn` (string, default: `null`): Required if `enable_waf_logging` is `true`. This is the ARN of the Kinesis Data Firehose delivery stream to which WAF logs will be sent.
+    *   `waf_logging_redacted_fields` (list of objects, default: `[]`): Specifies fields to redact from WAF logs. Each object in the list defines a single field type to redact. This helps protect sensitive data from appearing in logs.
+        *   To redact the HTTP method: `{ method = {} }`
+        *   To redact the URI path: `{ uri_path = {} }`
+        *   To redact the query string: `{ query_string = {} }`
+        *   To redact a single request header (e.g., "Authorization"): `{ single_header = { name = "Authorization" } }`
+    *   _Example for `waf_logging_redacted_fields`_: `[{ method = {} }, { uri_path = {} }, { single_header = { name = "User-Agent" } }]`
+
+*   **Common Tags (`common_tags`)**:
+    *   `common_tags` (map of string, default: `{}`): A map of tags to apply to all taggable WAF resources created by this module (specifically, the WAF IP Set and the WAF Web ACL). These tags are merged with resource-specific default `Name` tags, where the specific `Name` tag takes precedence in case of a conflict.
+
+*   **CloudWatch Metrics Configuration**:
+    *   Metrics for the module's default IP set allow rule (priority 1):
+        *   `WAF_IP_SET_ALLOW_CLOUDWATCH_METRICS` (bool): Set to `true` to enable CloudWatch metrics for this specific rule.
+        *   `WAF_IP_SET_ALLOW_SAMPLED_REQUESTS` (bool): Set to `true` to enable request sampling for this specific rule.
+    *   Metrics for the overall Web ACL resource:
+        *   `WAF_SCOPE_CLOUDWATCH_METRICS` (bool): Set to `true` to enable CloudWatch metrics for the Web ACL as a whole.
+        *   `WAF_SCOPE_SAMPLED_REQUESTS` (bool): Set to `true` to enable request sampling for the Web ACL as a whole.
+    *   Note: For rules defined via the `RULES` variable, metrics and sampling are configured within each rule object (`cloudwatch_metrics_enabled` and `sampled_requests_enabled` attributes).
+
+## Conclusion
+
+In summary, this Terraform module offers a standardized and reusable solution for bolstering the security of your AWS-hosted applications. By enabling IP-based access control (whitelisting) and providing the flexibility to integrate additional AWS Managed Rules, it helps establish a critical layer of defense against common web threats and unauthorized access. Its various customization options allow you to adapt the WAF deployment to diverse application needs and existing AWS environments.
 
 ## Example
 
+The following example demonstrates how to use the module with various configurations, including AWS Managed Rules, logging, and custom tags.
+**Note:** The example values for ARNs (like the Firehose ARN and resource association ARN) are placeholders and should be replaced with actual resource ARNs in a real deployment.
+
 ```hcl
-#WAF IP BLOCK MODULE
-
 module "waf_ip_block_module" {
-  source = "../.."
+  source = "./modules/waf" # Example: using a local path to the module
 
+  PROJECT_NAME                  = "my-web-app"
+  WAF_IP_SET_ALLOW              = "AllowOfficeAndVPNIPs" # Name for the default IP set allow rule
+  WAF_ALLOWED_IP_ADDRESS_LIST   = ["192.0.2.10/32", "203.0.113.0/28"]
 
-#ESSENTIAL VARIABLE
-  PROJECT_NAME = "test_project"
+  # WAF_IP_ADDRESS_VERSION defaults to "IPV4" in the module.
+  # WAF_IP_SET_SCOPE defaults to "REGIONAL" in the module.
 
-#STRUCTURAL VARIABLES
-  WAF_IP_ADDRESS_VERSION                = "IPV4"
-  WAF_ALLOWED_IP_ADDRESS_LIST           = []
-  WAF_IP_SET_SCOPE                      = "REGIONAL"
-  WAF_IP_SET_ALLOW                      = "IPSetAllow"
-  WAF_SCOPE_CLOUDWATCH_METRICS          = true
-  WAF_SCOPE_SAMPLED_REQUESTS            = false
-  WAF_IP_SET_ALLOW_CLOUDWATCH_METRICS   = true
-  WAF_IP_SET_ALLOW_SAMPLED_REQUESTS     = false
-  WEB_ACL_ASSOCIATION_RESOURCE_ARN_LIST = []
+  # Enable metrics for the default IP set allow rule (priority 1) and the Web ACL resource itself
+  WAF_IP_SET_ALLOW_CLOUDWATCH_METRICS = true
+  WAF_IP_SET_ALLOW_SAMPLED_REQUESTS   = true
+  WAF_SCOPE_CLOUDWATCH_METRICS        = true
+  WAF_SCOPE_SAMPLED_REQUESTS          = true
+
+  # Add AWS Managed Rules using the new 'RULES' structure
   RULES = [
     {
-      name                                     = "AWSManagedRulesSQLiRuleSet"
-      managed_rule_group_statement_name        = "AWSManagedRulesSQLiRuleSet"
-      managed_rule_group_statement_vendor_name = "AWS"
-      metric_name                              = "AWSManagedRulesSQLiRuleSet"
-      priority                                 = 2
+      name                       = "BlockCommonExploits"
+      priority                   = 10 # Ensure priority doesn't clash with the default IP set rule (priority 1)
+      override_action            = "none" # Use actions from rule group; change to "count" to only count
+      cloudwatch_metrics_enabled = true
+      sampled_requests_enabled   = true
+      # metric_name is optional, defaults to rule name if not set (e.g., "BlockCommonExploits")
+      managed_rule_group_statement = {
+        vendor_name = "AWS"
+        name        = "AWSManagedRulesCommonRuleSet"
+      }
     },
     {
-      name                                     = "AWSManagedRulesSQLiRuleSet"
-      managed_rule_group_statement_name        = "AWSManagedRulesSQLiRuleSet"
-      managed_rule_group_statement_vendor_name = "AWS"
-      metric_name                              = "AWSManagedRulesSQLiRuleSet"
-      priority                                 = 3
+      name                       = "BlockKnownBadInputs"
+      priority                   = 20
+      # Using default override_action ("none") from the variable definition
+      # Using default cloudwatch_metrics_enabled (false) and sampled_requests_enabled (false) from variable definition
+      managed_rule_group_statement = {
+        vendor_name = "AWS"
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+      }
     },
     {
-      name                                     = "AWSManagedRulesAnonymousIpList"
-      managed_rule_group_statement_name        = "AWSManagedRulesAnonymousIpList"
-      managed_rule_group_statement_vendor_name = "AWS"
-      metric_name                              = "AWSManagedRulesAnonymousIpList"
-      priority                                 = 4
+      name                       = "BlockAmazonIPReputationList"
+      priority                   = 30
+      override_action            = "count" # Only count for this one, perhaps for monitoring
+      cloudwatch_metrics_enabled = true
+      managed_rule_group_statement = {
+        vendor_name = "AWS"
+        name        = "AWSManagedRulesAmazonIpReputationList"
+      }
     }
   ]
+
+  # Configure WAF Logging (ensure the Kinesis Data Firehose delivery stream exists)
+  enable_waf_logging       = true
+  # IMPORTANT: Replace with your actual Kinesis Data Firehose ARN. This is a placeholder.
+  waf_logging_firehose_arn = "arn:aws:firehose:us-east-1:123456789012:deliverystream/my-app-waf-logs"
+
+  # Redact specific fields from WAF logs to protect sensitive information
+  waf_logging_redacted_fields = [
+    { method = {} },      # Redact the HTTP method (e.g., GET, POST)
+    { uri_path = {} },    # Redact the URI path (e.g., /login.php)
+    { query_string = {} },# Redact the query string (e.g., token=secret)
+    {                       # Redact a sensitive header like 'Authorization'
+      single_header = {
+        name = "Authorization"
+      }
+    },
+    {                       # Redact another potentially sensitive header
+      single_header = {
+        name = "Cookie"
+      }
+    }
+  ]
+
+  # Apply common tags to the WAF IP Set and Web ACL resources
+  common_tags = {
+    Environment   = "Production"
+    ApplicationID = "WebApp123"
+    ManagedBy     = "Terraform"
+    Team          = "Security"
+  }
+
+  # Associate the Web ACL with an AWS resource (e.g., Application Load Balancer ARN)
+  # Replace with your actual resource ARN(s) or leave empty if not associating immediately.
+  # WEB_ACL_ASSOCIATION_RESOURCE_ARN_LIST = ["arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/my-load-balancer/abcdef1234567890"]
+  WEB_ACL_ASSOCIATION_RESOURCE_ARN_LIST = [] # Defaults to empty list (no association) in the module
 }
 ```
 <!-- BEGIN_TF_DOCS -->
@@ -97,6 +247,8 @@ No requirements.
 | [aws_wafv2_web_acl.waf_web_acl_rules](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/wafv2_web_acl) | resource |
 | [aws_wafv2_web_acl_association.waf_association](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/wafv2_web_acl_association) | resource |
 
+</br>
+Key outputs from this module include the ARNs of the created WAF IP Set (`waf_ip_set_arn`) and Web ACL (`waf_web_acl_arn`), which can be used to reference these resources elsewhere in your Terraform configuration. Other outputs generally mirror the input variables for completeness.
 </br>
 
 ## Inputs
