@@ -18,6 +18,10 @@ module "waf_ip_block_module" {
       managed_rule_group_statement_vendor_name = "AWS"
       metric_name                              = "AWSManagedRulesAmazonIpReputationList"
       priority                                 = 2
+      managed_rule_group_statement = {
+        name        = "AWSManagedRulesAmazonIpReputationList"
+        vendor_name = "AWS"
+      }
     },
     {
       name                                     = "AWSManagedRulesSQLiRuleSet"
@@ -25,6 +29,10 @@ module "waf_ip_block_module" {
       managed_rule_group_statement_vendor_name = "AWS"
       metric_name                              = "AWSManagedRulesSQLiRuleSet"
       priority                                 = 3
+      managed_rule_group_statement = {
+        name        = "AWSManagedRulesSQLiRuleSet"
+        vendor_name = "AWS"
+      }
     },
     {
       name                                     = "AWSManagedRulesAnonymousIpList"
@@ -32,6 +40,10 @@ module "waf_ip_block_module" {
       managed_rule_group_statement_vendor_name = "AWS"
       metric_name                              = "AWSManagedRulesAnonymousIpList"
       priority                                 = 4
+      managed_rule_group_statement = {
+        name        = "AWSManagedRulesAnonymousIpList"
+        vendor_name = "AWS"
+      }
     }
   ]
 }

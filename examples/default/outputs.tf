@@ -52,3 +52,7 @@ output "WEB_ACL_ASSOCIATION_RESOURCE_ARN_LIST" {
   value       = module.waf_ip_block_module.WEB_ACL_ASSOCIATION_RESOURCE_ARN_LIST
   description = "A list for the Amazon Resource Name (ARN) of the resources to associate with the web ACL. Must be ARN(S) of an Application Load Balancer or an Amazon API Gateway stage"
 }
+
+output "waf_ip_set_arn" {
+  value = module.waf_ip_block_module.waf_ip_set_arn
+}
